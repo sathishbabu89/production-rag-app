@@ -193,3 +193,48 @@ class RAGPipeline:
         self.retriever.ingest_pdf(
             file_path
         )
+    
+    def stream_answer(
+        self,
+        query: str
+    ):
+        """
+        Streaming chatbot response
+        """
+
+        safe_query = PIIHandler.redact(query)
+
+        Guardrails.validate_query(
+            safe_query
+        )
+
+        rewritten_query = (
+            self.query_rewriter.rewrite(
+                safe_query
+            )
+        )
+
+        docs = self.retriever.retrieve(
+            rewritten_query
+        )
+
+        raw_context = "\n\n".join(
+            [doc.page_content for doc in docs]
+        )
+
+        context = Guardrails.sanitize_context(
+            raw_context
+        )
+
+        streaming_prompt_manager = PromptManager(
+            "streaming_prompt_v1.txt"
+        )
+
+        prompt = streaming_prompt_manager.format(
+            context,
+            safe_query
+        )
+
+        return self.llm.stream_generate(
+            prompt
+        )

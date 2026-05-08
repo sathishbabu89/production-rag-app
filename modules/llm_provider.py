@@ -27,3 +27,18 @@ class LLMProvider:
         response = self.llm.invoke(prompt)
 
         return response.content
+
+    @traceable(name="DeepSeek Streaming Generation")
+    def stream_generate(
+        self,
+        prompt: str
+    ):
+        """
+        Stream LLM response token-by-token
+        """
+
+        for chunk in self.llm.stream(prompt):
+
+            if chunk.content:
+
+                yield chunk.content
