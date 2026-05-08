@@ -1,0 +1,16 @@
+dotenv
+streamlit 
+langchain 
+langchain-community 
+langchain-core 
+chromadb 
+pypdf 
+openai 
+tiktoken 
+python-dotenv
+sentence-transformers
+langchain-text-splitters
+torchvision
+rank-bm25
+langsmith 
+langchain-openai
