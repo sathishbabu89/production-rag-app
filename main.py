@@ -1,3 +1,23 @@
+import os
+import logging
+import warnings
+
+
+# Suppress HF warnings
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+
+# Logging cleanup
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+
+warnings.filterwarnings("ignore")
+
 import streamlit as st
 import tempfile
 import os
