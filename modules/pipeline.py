@@ -7,10 +7,13 @@ from modules.retry_fallback import RetryFallbackHandler
 from modules.pii_handler import PIIHandler
 from modules.cost_tracker import CostTracker
 from modules.query_rewriter import QueryRewriter
+from modules.chat_memory import ChatMemory
 
 from langchain_core.output_parsers import PydanticOutputParser
 from langsmith import traceable
+
 import logging
+
 
 class RAGPipeline:
 
@@ -34,7 +37,15 @@ class RAGPipeline:
             self.llm
         )
 
-    def run(self, request: RAGRequest) -> RAGResponse:
+        # -----------------------------
+        # Conversational Memory
+        # -----------------------------
+        self.memory = ChatMemory()
+
+    def run(
+        self,
+        request: RAGRequest
+    ) -> RAGResponse:
         """
         Public entry point.
 
@@ -43,7 +54,7 @@ class RAGPipeline:
         """
 
         # -----------------------------
-        # Redact PII from user query
+        # Redact PII from query
         # -----------------------------
         safe_query = PIIHandler.redact(
             request.query
@@ -74,10 +85,24 @@ class RAGPipeline:
         """
 
         # -----------------------------
-        # Query Rewriting
+        # Conversation History
         # -----------------------------
-        rewritten_query = self.query_rewriter.rewrite(
-            safe_query
+        chat_history = self.memory.get_history()
+
+        # -----------------------------
+        # History-aware query rewriting
+        # -----------------------------
+        rewritten_query = (
+            self.query_rewriter
+            .rewrite_with_history(
+                safe_query,
+                chat_history
+            )
+        )
+
+        logging.info(
+            f"Using rewritten query for retrieval: "
+            f"{rewritten_query}"
         )
 
         # -----------------------------
@@ -87,16 +112,14 @@ class RAGPipeline:
             rewritten_query
         )
 
-        logging.info(
-            f"Using rewritten query for retrieval: "
-            f"{rewritten_query}"
-        )
-
         # -----------------------------
         # Build retrieval context
         # -----------------------------
         raw_context = "\n\n".join(
-            [doc.page_content for doc in docs]
+            [
+                doc.page_content
+                for doc in docs
+            ]
         )
 
         # -----------------------------
@@ -107,7 +130,7 @@ class RAGPipeline:
         )
 
         # -----------------------------
-        # Collect unique sources
+        # Unique sources
         # -----------------------------
         sources = list(
             set(
@@ -122,15 +145,17 @@ class RAGPipeline:
         )
 
         # -----------------------------
-        # Create prompt
+        # Prompt creation
+        # IMPORTANT:
+        # Use rewritten query
         # -----------------------------
         prompt = self.prompt_manager.format(
             context,
-            safe_query
+            rewritten_query
         )
 
         # -----------------------------
-        # Structured prompt
+        # Structured JSON prompt
         # -----------------------------
         structured_prompt = f"""
         {prompt}
@@ -160,12 +185,20 @@ class RAGPipeline:
             )
 
             # -----------------------------
-            # Parse structured output
+            # Structured parsing
             # -----------------------------
             response = self.retry_handler.execute(
                 "Output Parsing",
                 self.parser.parse,
                 raw_output
+            )
+
+            # -----------------------------
+            # Save conversation memory
+            # -----------------------------
+            self.memory.save_context(
+                safe_query,
+                response.answer
             )
 
             return response
@@ -182,10 +215,15 @@ class RAGPipeline:
             # -----------------------------
             self.cost_tracker.log_metrics(
                 structured_prompt,
-                raw_output if 'raw_output' in locals() else ""
+                raw_output
+                if 'raw_output' in locals()
+                else ""
             )
 
-    def ingest(self, file_path: str):
+    def ingest(
+        self,
+        file_path: str
+    ):
         """
         PDF ingestion entry point.
         """
@@ -193,7 +231,7 @@ class RAGPipeline:
         self.retriever.ingest_pdf(
             file_path
         )
-    
+
     def stream_answer(
         self,
         query: str
@@ -202,39 +240,99 @@ class RAGPipeline:
         Streaming chatbot response
         """
 
-        safe_query = PIIHandler.redact(query)
+        # -----------------------------
+        # Redact PII
+        # -----------------------------
+        safe_query = PIIHandler.redact(
+            query
+        )
 
+        # -----------------------------
+        # Validate query
+        # -----------------------------
         Guardrails.validate_query(
             safe_query
         )
 
+        # -----------------------------
+        # Conversation history
+        # -----------------------------
+        chat_history = self.memory.get_history()
+
+        # -----------------------------
+        # History-aware rewriting
+        # -----------------------------
         rewritten_query = (
-            self.query_rewriter.rewrite(
-                safe_query
+            self.query_rewriter
+            .rewrite_with_history(
+                safe_query,
+                chat_history
             )
         )
 
+        logging.info(
+            f"Using rewritten query for retrieval: "
+            f"{rewritten_query}"
+        )
+
+        # -----------------------------
+        # Retrieval
+        # -----------------------------
         docs = self.retriever.retrieve(
             rewritten_query
         )
 
+        # -----------------------------
+        # Build retrieval context
+        # -----------------------------
         raw_context = "\n\n".join(
-            [doc.page_content for doc in docs]
+            [
+                doc.page_content
+                for doc in docs
+            ]
         )
 
+        # -----------------------------
+        # Sanitize context
+        # -----------------------------
         context = Guardrails.sanitize_context(
             raw_context
         )
 
+        # -----------------------------
+        # Streaming prompt manager
+        # -----------------------------
         streaming_prompt_manager = PromptManager(
             "streaming_prompt_v1.txt"
         )
 
+        # -----------------------------
+        # IMPORTANT:
+        # Use rewritten query
+        # -----------------------------
         prompt = streaming_prompt_manager.format(
             context,
-            safe_query
+            rewritten_query
         )
 
-        return self.llm.stream_generate(
+        # -----------------------------
+        # Stream response
+        # -----------------------------
+        streamed_text = ""
+
+        for chunk in self.llm.stream_generate(
             prompt
+        ):
+
+            streamed_text += chunk
+
+            yield chunk
+
+        # -----------------------------
+        # Save conversation memory
+        # AFTER streaming completes
+        # -----------------------------
+        self.memory.save_context(
+            safe_query,
+            streamed_text
         )

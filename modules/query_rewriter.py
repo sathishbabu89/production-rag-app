@@ -3,6 +3,8 @@ import re
 
 from langsmith import traceable
 
+from modules.prompt_manager import PromptManager
+
 
 class QueryRewriter:
 
@@ -41,8 +43,6 @@ class QueryRewriter:
 
     # -----------------------------
     # Generic code / syntax indicators
-    # Helps avoid unnecessary rewriting
-    # for already-specific technical queries
     # -----------------------------
     CODE_INDICATORS = [
         "select ",
@@ -58,7 +58,10 @@ class QueryRewriter:
         "json"
     ]
 
-    def __init__(self, llm):
+    def __init__(
+        self,
+        llm
+    ):
 
         self.llm = llm
 
@@ -68,7 +71,7 @@ class QueryRewriter:
     ) -> bool:
         """
         Determine whether query rewriting
-        is actually necessary.
+        is necessary.
         """
 
         # -----------------------------
@@ -98,8 +101,7 @@ class QueryRewriter:
         query_lower = query.lower()
 
         # -----------------------------
-        # Tokenize safely
-        # Handles punctuation better
+        # Safe tokenization
         # -----------------------------
         tokens = re.findall(
             r"\b\w+\b",
@@ -107,7 +109,7 @@ class QueryRewriter:
         )
 
         # -----------------------------
-        # Skip rewriting for
+        # Skip rewrite for
         # syntax-heavy technical queries
         # -----------------------------
         if any(
@@ -124,7 +126,6 @@ class QueryRewriter:
 
         # -----------------------------
         # Very short queries
-        # Usually ambiguous
         # -----------------------------
         if len(tokens) <= self.VERY_SHORT_THRESHOLD:
 
@@ -137,8 +138,6 @@ class QueryRewriter:
 
         # -----------------------------
         # Pronoun ambiguity
-        # Only trigger when query
-        # is relatively short
         # -----------------------------
         pronoun_count = sum(
             1
@@ -161,8 +160,6 @@ class QueryRewriter:
 
         # -----------------------------
         # Conversational vague phrases
-        # Only for shorter queries
-        # to reduce false positives
         # -----------------------------
         has_vague_phrase = any(
             phrase in query_lower
@@ -183,8 +180,7 @@ class QueryRewriter:
             return True
 
         # -----------------------------
-        # Query already appears
-        # retrieval-friendly
+        # Query already retrieval-friendly
         # -----------------------------
         logging.info(
             "Selective Rewrite: "
@@ -199,14 +195,9 @@ class QueryRewriter:
         query: str
     ) -> str:
         """
-        Rewrite user query
-        only when necessary.
+        Single-turn query rewriting
         """
 
-        # -----------------------------
-        # Decide whether rewriting
-        # is actually needed
-        # -----------------------------
         if not self.should_rewrite(query):
 
             return query
@@ -251,6 +242,49 @@ class QueryRewriter:
         logging.info(
             f"Selective Rewrite Decision: "
             f"{self.should_rewrite(query)}"
+        )
+
+        return rewritten_query
+
+    @traceable(name="Conversational Query Rewriting")
+    def rewrite_with_history(
+        self,
+        query: str,
+        chat_history
+    ) -> str:
+        """
+        Conversational history-aware rewriting
+        """
+
+        if not self.should_rewrite(query):
+
+            return query
+
+        logging.info(
+            f"Original Query: {query}"
+        )
+
+        prompt = (
+            PromptManager
+            .conversational_retrieval_prompt()
+        )
+
+        formatted_prompt = prompt.format_messages(
+            chat_history=chat_history,
+            input=query
+        )
+
+        response = self.llm.llm.invoke(
+            formatted_prompt
+        )
+
+        rewritten_query = (
+            response.content.strip()
+        )
+
+        logging.info(
+            f"Rewritten Query: "
+            f"{rewritten_query}"
         )
 
         return rewritten_query
