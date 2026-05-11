@@ -48,7 +48,13 @@ st.title("📄 Production RAG Chatbot")
 # -----------------------------
 # Initialize Pipeline
 # -----------------------------
-pipeline = RAGPipeline()
+@st.cache_resource
+def load_pipeline():
+
+    return RAGPipeline()
+
+
+pipeline = load_pipeline()
 
 
 # -----------------------------
