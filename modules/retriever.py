@@ -5,6 +5,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.retrievers import BM25Retriever
 from langsmith import traceable
 from modules.pii_handler import PIIHandler
+from modules.entity_extractor import EntityExtractor
 from sentence_transformers import CrossEncoder
 from config import Config
 
@@ -145,8 +146,15 @@ class Retriever:
     @traceable(name="Hybrid Retrieval")
     def retrieve(self, query: str):
         """
-        Hybrid Retrieval:
-        Semantic Search + BM25 Search
+        Hybrid Retrieval Pipeline
+
+        Steps:
+        1. Semantic Retrieval (MMR)
+        2. BM25 Retrieval
+        3. Merge Results
+        4. Deduplicate
+        5. Entity-aware Boosting
+        6. Cross-Encoder Reranking
         """
 
         if not self.db:
@@ -158,6 +166,7 @@ class Retriever:
             self.load_existing()
 
         if not self.db:
+
             raise ValueError(
                 "No vector database available. Please upload a PDF first."
             )
@@ -166,74 +175,146 @@ class Retriever:
             f"Running hybrid retrieval for query: {query}"
         )
 
-        # -----------------------------
-        # Semantic Retrieval
-        # -----------------------------
-        semantic_results = self.db.max_marginal_relevance_search(
-            query=query,
-            k=Config.TOP_K,
-            fetch_k=Config.MMR_FETCH_K,
-            lambda_mult=Config.MMR_LAMBDA
-        )
-
-        logging.info(            
-            f"MMR Semantic Results: {len(semantic_results)}"
-        )
-
-        for idx, doc in enumerate(semantic_results):
-            logging.info(
-                f"MMR Chunk {idx+1}: "
-                f"{doc.page_content[:120]}"
+        # -------------------------------------------------
+        # Semantic Retrieval using MMR
+        # -------------------------------------------------
+        semantic_results = (
+            self.db.max_marginal_relevance_search(
+                query=query,
+                k=Config.TOP_K,
+                fetch_k=Config.MMR_FETCH_K,
+                lambda_mult=Config.MMR_LAMBDA
             )
-
-        # -----------------------------
-        # BM25 Retrieval
-        # -----------------------------
-        bm25_results = self.bm25_retriever.invoke(
-            query
         )
 
         logging.info(
-            f"BM25 Results: {len(bm25_results)}"
+            f"MMR Semantic Results: "
+            f"{len(semantic_results)}"
         )
 
-        # -----------------------------
-        # Merge Results
-        # -----------------------------
+        for idx, doc in enumerate(semantic_results):
+
+            logging.info(
+                f"MMR Chunk {idx + 1}: "
+                f"{doc.page_content[:120]}"
+            )
+
+        # -------------------------------------------------
+        # BM25 Retrieval
+        # -------------------------------------------------
+        bm25_results = (
+            self.bm25_retriever.invoke(
+                query
+            )
+        )
+
+        logging.info(
+            f"BM25 Results: "
+            f"{len(bm25_results)}"
+        )
+
+        # -------------------------------------------------
+        # Merge Retrieval Results
+        # -------------------------------------------------
         combined_results = (
             semantic_results + bm25_results
         )
 
-        # -----------------------------
+        # -------------------------------------------------
         # Deduplicate Results
-        # -----------------------------
+        # -------------------------------------------------
         unique_docs = []
 
         seen_content = set()
 
         for doc in combined_results:
 
-            if doc.page_content not in seen_content:
+            content = doc.page_content.strip()
+
+            if content not in seen_content:
 
                 unique_docs.append(doc)
 
-                seen_content.add(doc.page_content)
+                seen_content.add(content)
 
-        # -----------------------------
-        # Limit reranker candidates
-        # -----------------------------
-        candidate_docs = unique_docs[:10]
+        logging.info(
+            f"Unique Retrieved Chunks: "
+            f"{len(unique_docs)}"
+        )
 
-        # -----------------------------
-        # Cross-Encoder Reranking
-        # -----------------------------
-        reranked_results = self.rerank_documents(
-            query,
-            candidate_docs
+        # -------------------------------------------------
+        # Entity-aware Boosting
+        # -------------------------------------------------
+        entities = (
+            EntityExtractor.extract_entities(
+                query
+            )
+        )
+
+        boosted_unique_docs = unique_docs
+
+        if entities:
+
+            logging.info(
+                f"Detected entities: {entities}"
+            )
+
+            boosted_docs = []
+
+            other_docs = []
+
+            for doc in unique_docs:
+
+                content_lower = (
+                    doc.page_content.lower()
+                )
+
+                if any(
+                    entity in content_lower
+                    for entity in entities
+                ):
+
+                    boosted_docs.append(doc)
+
+                else:
+
+                    other_docs.append(doc)
+
+            boosted_unique_docs = (
+                boosted_docs + other_docs
+            )
+
+            logging.info(
+                f"Entity boosted chunks: "
+                f"{len(boosted_docs)}"
+            )
+
+        # -------------------------------------------------
+        # Limit Candidate Docs
+        # -------------------------------------------------
+        candidate_docs = (
+            boosted_unique_docs[:10]
         )
 
         logging.info(
-            f"Retrieved {len(reranked_results)} reranked chunks"
+            f"Candidate Docs for Reranking: "
+            f"{len(candidate_docs)}"
+        )
+
+        # -------------------------------------------------
+        # Cross-Encoder Reranking
+        # -------------------------------------------------
+        reranked_results = (
+            self.rerank_documents(
+                query,
+                candidate_docs
+            )
+        )
+
+        logging.info(
+            f"Retrieved "
+            f"{len(reranked_results)} "
+            f"reranked chunks"
         )
 
         return reranked_results
