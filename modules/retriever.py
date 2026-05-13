@@ -290,11 +290,55 @@ class Retriever:
             )
 
         # -------------------------------------------------
-        # Limit Candidate Docs
+        # Entity-prioritized candidate selection
         # -------------------------------------------------
-        candidate_docs = (
-            boosted_unique_docs[:10]
-        )
+        if entities:
+
+            entity_docs = []
+
+            fallback_docs = []
+
+            for doc in boosted_unique_docs:
+
+                content_lower = (
+                    doc.page_content.lower()
+                )
+
+                if any(
+                    entity in content_lower
+                    for entity in entities
+                ):
+
+                    entity_docs.append(doc)
+
+                else:
+
+                    fallback_docs.append(doc)
+
+            # -----------------------------------------
+            # Prioritize entity-matching chunks
+            # -----------------------------------------
+            candidate_docs = (
+                entity_docs[:5]
+                +
+                fallback_docs[:2]
+            )
+
+            logging.info(
+                f"Entity candidate docs: "
+                f"{len(entity_docs)}"
+            )
+
+            logging.info(
+                f"Fallback candidate docs: "
+                f"{len(fallback_docs)}"
+            )
+
+        else:
+
+            candidate_docs = (
+                boosted_unique_docs[:10]
+            )
 
         logging.info(
             f"Candidate Docs for Reranking: "
