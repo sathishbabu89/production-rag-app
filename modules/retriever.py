@@ -164,13 +164,6 @@ class Retriever:
             f"Loaded {len(documents)} pages from PDF"
         )
 
-        for idx, doc in enumerate(documents):
-
-            logging.info(
-                f"\n--- PAGE {idx+1} PREVIEW ---\n"
-                f"{repr(doc.page_content[:500])}"
-            )
-
         # -----------------------------
         # Split into chunks
         # -----------------------------
@@ -505,22 +498,79 @@ class Retriever:
             pairs
         )
 
-        reranked = sorted(
-            zip(documents, scores),
-            key=lambda x: x[1],
+        # -----------------------------
+        # Build scored docs
+        # -----------------------------
+
+        scored_docs = []
+
+        for doc, score in zip(documents, scores):
+
+            scored_docs.append({
+
+                "document": doc,
+
+                "score": float(score)
+            })
+
+        # -----------------------------
+        # Sort by reranker score
+        # -----------------------------
+
+        reranked_docs = sorted(
+            scored_docs,
+            key=lambda x: x["score"],
             reverse=True
         )
 
-        reranked_docs = [
-            doc for doc, score in reranked
-        ]
+        # -----------------------------
+        # Log reranked scores
+        # -----------------------------
 
-        for idx, (doc, score) in enumerate(reranked):
+        for idx, item in enumerate(reranked_docs):
 
             logging.info(
                 f"Reranked {idx+1} | "
-                f"Score: {score:.4f} | "
-                f"{doc.page_content[:120]}"
+                f"Score: {item['score']:.4f} | "
+                f"{item['document'].page_content[:120]}"
             )
 
-        return reranked_docs[:Config.TOP_K]
+        # -----------------------------
+        # Threshold Filtering
+        # -----------------------------
+
+        filtered_docs = [
+
+            item["document"]
+
+            for item in reranked_docs
+
+            if item["score"] >=
+            Config.RERANKER_SCORE_THRESHOLD
+        ]
+
+        logging.info(
+            f"Chunks after threshold filtering: "
+            f"{len(filtered_docs)}"
+        )
+
+        # -----------------------------
+        # Safety fallback
+        # -----------------------------
+
+        if len(filtered_docs) < Config.MIN_RERANKED_RESULTS:
+
+            logging.warning(
+                "Threshold removed all chunks. "
+                "Using top reranked result."
+            )
+
+            filtered_docs = [
+                reranked_docs[0]["document"]
+            ]
+
+        # -----------------------------
+        # Final Top-K
+        # -----------------------------
+
+        return filtered_docs[:Config.TOP_K]

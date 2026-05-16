@@ -25,3 +25,10 @@ class Config:
 
     # Reranker
     RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # -----------------------------
+    # Reranker Threshold Filtering
+    # -----------------------------
+
+    RERANKER_SCORE_THRESHOLD = -2.0
+    MIN_RERANKED_RESULTS = 1
