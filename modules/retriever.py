@@ -4,6 +4,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.retrievers import BM25Retriever
 from langsmith import traceable
 from langchain_community.document_loaders import (
+    PyMuPDFLoader,
     UnstructuredPDFLoader
 )
 from modules.pii_handler import PIIHandler
@@ -92,14 +93,72 @@ class Retriever:
         # -----------------------------
         # Load PDF
         # -----------------------------
-        
-        #loader = PyMuPDFLoader(file_path)
-        loader = UnstructuredPDFLoader(
-            file_path,
-            strategy="hi_res"
+
+        # -----------------------------
+        # Try Fast Text Extraction
+        # -----------------------------
+
+        logging.info(
+            "Attempting PyMuPDF extraction..."
         )
 
+        loader = PyMuPDFLoader(file_path)
+
         documents = loader.load()
+
+        combined_text = " ".join(
+            doc.page_content
+            for doc in documents
+        )
+
+        # -----------------------------
+        # Validate Extraction Quality
+        # -----------------------------
+
+        MIN_TEXT_THRESHOLD = 200
+
+        if len(combined_text.strip()) > MIN_TEXT_THRESHOLD:
+
+            logging.info(
+                "Document Type: text_pdf"
+            )
+
+            logging.info(
+                "Parser Used: PyMuPDF"
+            )
+
+            logging.info(
+                "OCR Used: False"
+            )
+
+        else:
+
+            logging.warning(
+                "PyMuPDF extraction weak."
+            )
+
+            logging.warning(
+                "Falling back to OCR..."
+            )
+
+            loader = UnstructuredPDFLoader(
+                file_path,
+                strategy="hi_res"
+            )
+
+            documents = loader.load()
+
+            logging.info(
+                "Document Type: scanned_pdf"
+            )
+
+            logging.info(
+                "Parser Used: OCR"
+            )
+
+            logging.info(
+                "OCR Used: True"
+            )
 
         logging.info(
             f"Loaded {len(documents)} pages from PDF"
