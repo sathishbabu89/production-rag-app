@@ -32,3 +32,10 @@ class Config:
 
     RERANKER_SCORE_THRESHOLD = -2.0
     MIN_RERANKED_RESULTS = 1
+
+    # -----------------------------
+    # Score Gap Filtering
+    # -----------------------------
+
+    ENABLE_SCORE_GAP_FILTERING = True
+    RERANKER_SCORE_GAP_THRESHOLD = 5.0

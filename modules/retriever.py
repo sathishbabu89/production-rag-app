@@ -483,16 +483,28 @@ class Retriever:
     ):
         """
         Rerank retrieved documents using cross-encoder
+        with:
+        - Threshold filtering
+        - Score gap filtering
+        - Confidence-aware retrieval
         """
 
         logging.info(
             "Starting cross-encoder reranking..."
         )
 
+        # -----------------------------
+        # Build query-document pairs
+        # -----------------------------
+
         pairs = [
             (query, doc.page_content)
             for doc in documents
         ]
+
+        # -----------------------------
+        # Predict reranker scores
+        # -----------------------------
 
         scores = self.reranker.predict(
             pairs
@@ -524,7 +536,7 @@ class Retriever:
         )
 
         # -----------------------------
-        # Log reranked scores
+        # Log reranked results
         # -----------------------------
 
         for idx, item in enumerate(reranked_docs):
@@ -541,7 +553,7 @@ class Retriever:
 
         filtered_docs = [
 
-            item["document"]
+            item
 
             for item in reranked_docs
 
@@ -555,7 +567,7 @@ class Retriever:
         )
 
         # -----------------------------
-        # Safety fallback
+        # Safety Fallback
         # -----------------------------
 
         if len(filtered_docs) < Config.MIN_RERANKED_RESULTS:
@@ -566,11 +578,76 @@ class Retriever:
             )
 
             filtered_docs = [
-                reranked_docs[0]["document"]
+                reranked_docs[0]
             ]
 
         # -----------------------------
-        # Final Top-K
+        # Score Gap Filtering
         # -----------------------------
 
-        return filtered_docs[:Config.TOP_K]
+        if (
+            Config.ENABLE_SCORE_GAP_FILTERING
+            and len(filtered_docs) >= 2
+        ):
+
+            top_score = (
+                filtered_docs[0]["score"]
+            )
+
+            second_score = (
+                filtered_docs[1]["score"]
+            )
+
+            score_gap = (
+                top_score - second_score
+            )
+
+            logging.info(
+                f"Top Score: "
+                f"{top_score:.4f}"
+            )
+
+            logging.info(
+                f"Second Score: "
+                f"{second_score:.4f}"
+            )
+
+            logging.info(
+                f"Score Gap: "
+                f"{score_gap:.4f}"
+            )
+
+            if (
+                score_gap >=
+                Config.RERANKER_SCORE_GAP_THRESHOLD
+            ):
+
+                logging.info(
+                    "Large score gap detected. "
+                    "Returning only top chunk."
+                )
+
+                filtered_docs = [
+                    filtered_docs[0]
+                ]
+
+        # -----------------------------
+        # Final Documents
+        # -----------------------------
+
+        final_docs = [
+
+            item["document"]
+
+            for item in filtered_docs[
+                :Config.TOP_K
+            ]
+        ]
+
+        logging.info(
+            f"Retrieved "
+            f"{len(final_docs)} "
+            f"reranked chunks"
+        )
+
+        return final_docs
