@@ -1,9 +1,11 @@
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.retrievers import BM25Retriever
 from langsmith import traceable
+from langchain_community.document_loaders import (
+    UnstructuredPDFLoader
+)
 from modules.pii_handler import PIIHandler
 from modules.entity_extractor import EntityExtractor
 from sentence_transformers import CrossEncoder
@@ -12,6 +14,32 @@ from config import Config
 import os
 import uuid
 import logging
+import pytesseract
+
+# ---------------------------------
+# Tesseract OCR Configuration
+# ---------------------------------
+
+TESSERACT_PATH = (
+    r"C:\Program Files\Tesseract-OCR"
+)
+
+TESSDATA_PATH = (
+    r"C:\Program Files\Tesseract-OCR\tessdata"
+)
+
+os.environ["PATH"] += (
+    os.pathsep + TESSERACT_PATH
+)
+
+os.environ["TESSDATA_PREFIX"] = (
+    TESSDATA_PATH
+)
+
+pytesseract.pytesseract.tesseract_cmd = (
+    rf"{TESSERACT_PATH}\tesseract.exe"
+)
+
 
 
 class Retriever:
@@ -64,7 +92,12 @@ class Retriever:
         # -----------------------------
         # Load PDF
         # -----------------------------
-        loader = PyPDFLoader(file_path)
+        
+        #loader = PyMuPDFLoader(file_path)
+        loader = UnstructuredPDFLoader(
+            file_path,
+            strategy="hi_res"
+        )
 
         documents = loader.load()
 
@@ -72,12 +105,34 @@ class Retriever:
             f"Loaded {len(documents)} pages from PDF"
         )
 
+        for idx, doc in enumerate(documents):
+
+            logging.info(
+                f"\n--- PAGE {idx+1} PREVIEW ---\n"
+                f"{repr(doc.page_content[:500])}"
+            )
+
         # -----------------------------
         # Split into chunks
         # -----------------------------
+
         splitter = RecursiveCharacterTextSplitter(
+
             chunk_size=800,
-            chunk_overlap=100
+
+            chunk_overlap=100,
+
+            separators=[
+                "\n# ",
+                "\n## ",
+                "\n### ",
+                "\n\n",
+                "\n- ",
+                "\n• ",
+                "\n",
+                ". ",
+                " "
+            ]
         )
 
         docs = splitter.split_documents(documents)
@@ -197,6 +252,11 @@ class Retriever:
             logging.info(
                 f"MMR Chunk {idx + 1}: "
                 f"{doc.page_content[:120]}"
+            )
+
+            logging.info(
+                f"MMR Metadata {idx + 1}: "
+                f"{doc.metadata}"
             )
 
         # -------------------------------------------------
