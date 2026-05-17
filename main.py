@@ -23,8 +23,9 @@ import tempfile
 import os
 import time
 
-from modules.pipeline import RAGPipeline
-from modules.schema import RAGRequest
+from modules.orchestrator import (
+    Orchestrator
+)
 
 from langsmith import Client
 
@@ -48,13 +49,14 @@ st.title("📄 Production RAG Chatbot")
 # -----------------------------
 # Initialize Pipeline
 # -----------------------------
+
 @st.cache_resource
-def load_pipeline():
+def load_assistant():
 
-    return RAGPipeline()
+    return Orchestrator()
 
 
-pipeline = load_pipeline()
+assistant = load_assistant()
 
 
 # -----------------------------
@@ -78,8 +80,10 @@ if uploaded_file:
         )
 
         temp_path = tmp_file.name
-
-    pipeline.ingest(temp_path)
+    
+    assistant.pipeline.ingest(
+        temp_path
+    )
 
     st.success(
         "PDF processed successfully!"
@@ -95,7 +99,7 @@ user_query = st.text_input(
 
 
 # -----------------------------
-# Streaming Response
+# User Query Processing
 # -----------------------------
 if user_query:
 
@@ -103,24 +107,70 @@ if user_query:
 
         response_container = st.empty()
 
-        streamed_text = ""
-
-        
-        for chunk in pipeline.stream_answer(
-            user_query
+        with st.spinner(
+            "Processing query..."
         ):
 
-            streamed_text += chunk
-
-            response_container.markdown(
-                streamed_text + "▌"
+            response = (
+                assistant.process_query(
+                    user_query
+                )
             )
 
-            time.sleep(0.01)
+        # -----------------------------
+        # SQL Route
+        # -----------------------------
 
-        response_container.markdown(
-            streamed_text
-        )
+        if response["route"] == "SQL":
+
+            response_container.markdown(
+                "## 🗄 SQL Results"
+            )
+
+            response_container.write(
+
+                response["results"]
+            )
+
+        # -----------------------------
+        # RAG Route
+        # -----------------------------
+
+        elif response["route"] == "RAG":
+
+            response_container.markdown(
+                "## 📚 RAG Response"
+            )
+
+            response_container.markdown(
+
+                response["response"].answer
+            )
+
+        # -----------------------------
+        # HYBRID Route
+        # -----------------------------
+
+        elif response["route"] == "HYBRID":
+
+            response_container.markdown(
+                "## 🔥 Hybrid Response"
+            )
+
+            response_container.markdown(
+
+                response["final_answer"]
+            )
+
+        # -----------------------------
+        # Error Handling
+        # -----------------------------
+
+        else:
+
+            response_container.write(
+                response
+            )
 
     except Exception as e:
 

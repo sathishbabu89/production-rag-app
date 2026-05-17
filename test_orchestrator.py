@@ -14,7 +14,9 @@ queries = [
 
     "Which company has highest revenue?",
 
-    "Explain Zoho story"
+    "Explain Zoho story",
+
+    "Explain Zoho story and show employee count"
 ]
 
 for query in queries:
