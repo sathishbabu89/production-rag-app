@@ -172,6 +172,22 @@ if user_query:
                 response
             )
 
+        # -----------------------------
+        # Diagnostics Dashboard
+        # -----------------------------
+
+        if "diagnostics" in response:
+
+            diagnostics = (
+                response["diagnostics"]
+            )
+
+            with st.expander(
+                "🔍 Retrieval Diagnostics"
+            ):
+
+                st.json(diagnostics)
+
     except Exception as e:
 
         st.error(

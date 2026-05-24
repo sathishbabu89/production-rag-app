@@ -1,4 +1,5 @@
 import logging
+import time
 
 from modules.llm_provider import (
     LLMProvider
@@ -58,6 +59,27 @@ class Orchestrator:
             f"Processing Query: {query}"
         )
 
+        start_time = time.time()
+
+        diagnostics = {
+
+            "original_query": query,
+
+            "route": None,
+
+            "decomposed_queries": {},
+
+            "generated_sql": None,
+
+            "sql_results": None,
+
+            "rag_query": None,
+
+            "sql_query_text": None,
+
+            "latency_seconds": None
+        }
+
         # -----------------------------
         # Query Classification
         # -----------------------------
@@ -71,6 +93,8 @@ class Orchestrator:
         logging.info(
             f"Selected Route: {route}"
         )
+
+        diagnostics["route"] = route
 
         # -----------------------------
         # SQL Route
@@ -104,13 +128,24 @@ class Orchestrator:
 
             if not is_valid:
 
+                end_time = time.time()
+
+                diagnostics["latency_seconds"] = round(
+
+                    end_time - start_time,
+
+                    2
+                )
+
                 return {
 
                     "route": route,
 
                     "error": (
                         "Unsafe SQL query blocked."
-                    )
+                    ),
+
+                    "diagnostics": diagnostics
                 }
 
             # -----------------------------
@@ -123,13 +158,24 @@ class Orchestrator:
                 )
             )
 
+            end_time = time.time()
+
+            diagnostics["latency_seconds"] = round(
+
+                end_time - start_time,
+
+                2
+            )
+
             return {
 
                 "route": route,
 
                 "sql_query": sql_query,
 
-                "results": results
+                "results": results,
+
+                "diagnostics": diagnostics
             }
 
         # -----------------------------
@@ -148,17 +194,32 @@ class Orchestrator:
                     query=query
                 )
 
+                diagnostics["rag_query"] = (
+                    query
+                )
+
                 response = (
                     self.pipeline.run(
                         request
                     )
                 )
 
+                end_time = time.time()
+
+                diagnostics["latency_seconds"] = round(
+
+                    end_time - start_time,
+
+                    2
+                )
+
                 return {
 
                     "route": route,
 
-                    "response": response
+                    "response": response,
+
+                    "diagnostics": diagnostics
                 }
 
             except Exception as e:
@@ -167,11 +228,22 @@ class Orchestrator:
                     f"RAG Route Error: {e}"
                 )
 
+                end_time = time.time()
+
+                diagnostics["latency_seconds"] = round(
+
+                    end_time - start_time,
+
+                    2
+                )
+
                 return {
 
                     "route": route,
 
-                    "error": str(e)
+                    "error": str(e),
+
+                    "diagnostics": diagnostics
                 }
 
         elif route == "HYBRID":
@@ -199,6 +271,20 @@ class Orchestrator:
                     decomposed["sql_query"]
                 )
 
+                diagnostics["decomposed_queries"] = {
+
+                    "rag_query": rag_query,
+
+                    "sql_query": sql_query_text
+                }
+
+                diagnostics["rag_query"] = (
+                    rag_query
+                )
+
+                diagnostics["sql_query_text"] = (
+                    sql_query_text
+                )
                 # -----------------------------
                 # Fallback Safety
                 # -----------------------------
@@ -227,6 +313,10 @@ class Orchestrator:
                     query=rag_query
                 )
 
+                diagnostics["rag_query"] = (
+                    query
+                )
+
                 rag_response = (
                     self.pipeline.run(
                         request
@@ -243,6 +333,10 @@ class Orchestrator:
                     )
                 )
 
+                diagnostics["generated_sql"] = (
+                    sql_query
+                )
+
                 is_valid = (
                     SQLValidator.validate_query(
                         sql_query
@@ -257,6 +351,10 @@ class Orchestrator:
                         SQLExecutor.execute_query(
                             sql_query
                         )
+                    )
+
+                    diagnostics["sql_results"] = (
+                        sql_results
                     )
 
                 else:
@@ -302,6 +400,15 @@ class Orchestrator:
                     )
                 )
 
+                end_time = time.time()
+
+                diagnostics["latency_seconds"] = round(
+
+                    end_time - start_time,
+
+                    2
+                )
+
                 return {
 
                     "route": route,
@@ -312,7 +419,9 @@ class Orchestrator:
 
                     "sql_results": sql_results,
 
-                    "final_answer": final_answer
+                    "final_answer": final_answer,
+
+                    "diagnostics": diagnostics
                 }
 
             except Exception as e:
@@ -321,16 +430,36 @@ class Orchestrator:
                     f"HYBRID Route Error: {e}"
                 )
 
+                end_time = time.time()
+
+                diagnostics["latency_seconds"] = round(
+
+                    end_time - start_time,
+
+                    2
+                )
+
                 return {
 
                     "route": route,
 
-                    "error": str(e)
+                    "error": str(e),
+
+                    "diagnostics": diagnostics
                 }
 
         # -----------------------------
         # Unknown Route
         # -----------------------------
+
+        end_time = time.time()
+
+        diagnostics["latency_seconds"] = round(
+
+            end_time - start_time,
+
+            2
+        )
 
         return {
 
