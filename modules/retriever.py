@@ -250,6 +250,100 @@ class Retriever:
             "PDF ingestion completed successfully"
         )
         
+    def reciprocal_rank_fusion(
+        self,
+        semantic_results,
+        bm25_results
+    ):
+        """
+        Reciprocal Rank Fusion (RRF)
+        for hybrid retrieval.
+        """
+
+        logging.info(
+            "Applying Reciprocal Rank Fusion..."
+        )
+
+        rrf_scores = {}
+
+        doc_mapping = {}
+
+        k = Config.RRF_K
+
+        # -----------------------------
+        # Semantic Rankings
+        # -----------------------------
+
+        for rank, doc in enumerate(
+            semantic_results,
+            start=1
+        ):
+
+            doc_id = doc.page_content.strip()
+
+            rrf_score = 1 / (k + rank)
+
+            rrf_scores[doc_id] = (
+                rrf_scores.get(doc_id, 0)
+                + rrf_score
+            )
+
+            doc_mapping[doc_id] = doc
+
+        # -----------------------------
+        # BM25 Rankings
+        # -----------------------------
+
+        for rank, doc in enumerate(
+            bm25_results,
+            start=1
+        ):
+
+            doc_id = doc.page_content.strip()
+
+            rrf_score = 1 / (k + rank)
+
+            rrf_scores[doc_id] = (
+                rrf_scores.get(doc_id, 0)
+                + rrf_score
+            )
+
+            doc_mapping[doc_id] = doc
+
+        # -----------------------------
+        # Sort by RRF score
+        # -----------------------------
+
+        ranked_docs = sorted(
+            rrf_scores.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        logging.info(
+            f"RRF fused chunks: "
+            f"{len(ranked_docs)}"
+        )
+
+        for idx, (doc_id, score) in enumerate(
+            ranked_docs
+        ):
+
+            logging.info(
+                f"RRF Rank {idx+1} | "
+                f"Score: {score:.6f}"
+            )
+
+        fused_docs = [
+
+            doc_mapping[doc_id]
+
+            for doc_id, _
+            in ranked_docs
+        ]
+
+        return fused_docs 
+
     @traceable(name="Hybrid Retrieval")
     def retrieve(self, query: str):
         """
@@ -326,11 +420,25 @@ class Retriever:
         )
 
         # -------------------------------------------------
-        # Merge Retrieval Results
+        # Hybrid Fusion
         # -------------------------------------------------
-        combined_results = (
-            semantic_results + bm25_results
-        )
+
+        if Config.ENABLE_RRF:
+
+            combined_results = (
+                self.reciprocal_rank_fusion(
+                    semantic_results,
+                    bm25_results
+                )
+            )
+
+        else:
+
+            combined_results = (
+                semantic_results
+                +
+                bm25_results
+            )
 
         # -------------------------------------------------
         # Deduplicate Results

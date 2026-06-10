@@ -39,3 +39,11 @@ class Config:
 
     ENABLE_SCORE_GAP_FILTERING = True
     RERANKER_SCORE_GAP_THRESHOLD = 5.0
+
+    # -----------------------------
+    # RRF Hybrid Fusion
+    # -----------------------------
+
+    ENABLE_RRF = True
+
+    RRF_K = 60
