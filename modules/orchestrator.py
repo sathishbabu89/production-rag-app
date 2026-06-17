@@ -1,467 +1,430 @@
 import logging
 import time
 
-from modules.llm_provider import (
-    LLMProvider
-)
+from modules.llm_provider import LLMProvider
+from modules.query_decomposer import QueryDecomposer
+from modules.pipeline import RAGPipeline
+from modules.schema import RAGRequest
+from modules.query_classifier import QueryClassifier
+from modules.text_to_sql import TextToSQL
+from modules.sql_validator import SQLValidator
+from modules.sql_executor import SQLExecutor
 
-from modules.query_decomposer import (
-    QueryDecomposer
-)
-
-from modules.pipeline import (
-    RAGPipeline
-)
-
-from modules.schema import (
-    RAGRequest
-)
-
-from modules.query_classifier import (
-    QueryClassifier
-)
-
-from modules.text_to_sql import (
-    TextToSQL
-)
-
-from modules.sql_validator import (
-    SQLValidator
-)
-
-from modules.sql_executor import (
-    SQLExecutor
-)
+from modules.conversation_state import ConversationState
+from modules.entity_extractor import EntityExtractor
 
 
 class Orchestrator:
 
     def __init__(self):
 
-        self.sql_generator = (
-            TextToSQL()
-        )
-
+        self.sql_generator = TextToSQL()
         self.pipeline = RAGPipeline()
-
         self.llm = LLMProvider()
+        self.decomposer = QueryDecomposer()
 
-        self.decomposer = (
-            QueryDecomposer()
-        )
+        # -----------------------------
+        # Conversation State
+        # -----------------------------
+        self.state = ConversationState()
 
-    def process_query(
+    def update_conversation_entity(
         self,
         query: str
     ):
+        """
+        Update entity state only when
+        a valid business entity is found.
+        """
 
-        logging.info(
-            f"Processing Query: {query}"
-        )
-
-        start_time = time.time()
-
-        diagnostics = {
-
-            "original_query": query,
-
-            "route": None,
-
-            "decomposed_queries": {},
-
-            "generated_sql": None,
-
-            "sql_results": None,
-
-            "rag_query": None,
-
-            "sql_query_text": None,
-
-            "latency_seconds": None
-        }
-
-        # -----------------------------
-        # Query Classification
-        # -----------------------------
-
-        route = (
-            QueryClassifier.classify_query(
+        entities = (
+            EntityExtractor.extract_entities(
                 query
             )
         )
 
         logging.info(
-            f"Selected Route: {route}"
+            f"Extracted Entities: {entities}"
         )
 
-        diagnostics["route"] = route
+        if not entities:
 
-        # -----------------------------
-        # SQL Route
-        # -----------------------------
+            return
 
-        if route == "SQL":
+        INVALID_ENTITIES = {
+
+            "Who",
+            "What",
+            "When",
+            "Where",
+            "Why",
+            "How",
+            "Explain",
+            "Tell",
+            "Show",
+            "Describe"
+        }
+
+        for entity in entities:
+
+            entity = entity.strip()
+
+            if entity in INVALID_ENTITIES:
+
+                continue
+
+            self.state.update_entity(
+                entity
+            )
 
             logging.info(
-                "Executing SQL route..."
+                f"Conversation Entity Updated: "
+                f"{entity}"
             )
 
-            # -----------------------------
-            # Generate SQL
-            # -----------------------------
+            return
 
-            sql_query = (
-                self.sql_generator.generate_sql(
-                    query
-                )
+    # =================================================
+    # Conversation Resolver
+    # =================================================
+    def resolve_query_context(
+        self,
+        query: str
+    ):
+
+        current_entity = (
+            self.state.get_entity()
+        )
+
+        if not current_entity:
+
+            return query
+
+        query_lower = query.lower()
+
+        # --------------------------------
+        # Employee count
+        # --------------------------------
+
+        if (
+            "employee count" in query_lower
+            or "how many employees" in query_lower
+        ):
+
+            resolved = (
+                f"Show employee count for "
+                f"{current_entity}"
             )
 
-            # -----------------------------
-            # Validate SQL
-            # -----------------------------
-
-            is_valid = (
-                SQLValidator.validate_query(
-                    sql_query
-                )
+            logging.info(
+                f"Conversation Resolver: "
+                f"{query} -> {resolved}"
             )
 
-            if not is_valid:
+            return resolved
 
-                end_time = time.time()
+        # --------------------------------
+        # Founder
+        # --------------------------------
 
-                diagnostics["latency_seconds"] = round(
+        if (
+            "who founded" in query_lower
+            or "founder" in query_lower
+        ):
 
-                    end_time - start_time,
+            resolved = (
+                f"Who founded "
+                f"{current_entity}"
+            )
 
-                    2
-                )
+            logging.info(
+                f"Conversation Resolver: "
+                f"{query} -> {resolved}"
+            )
+
+            return resolved
+
+        # --------------------------------
+        # Founded year
+        # --------------------------------
+
+        if (
+            "when was it founded" in query_lower
+            or "when founded" in query_lower
+        ):
+
+            resolved = (
+                f"When was "
+                f"{current_entity} founded"
+            )
+
+            logging.info(
+                f"Conversation Resolver: "
+                f"{query} -> {resolved}"
+            )
+
+            return resolved
+
+        # --------------------------------
+        # Revenue
+        # --------------------------------
+
+        if "revenue" in query_lower:
+
+            resolved = (
+                f"Show revenue for "
+                f"{current_entity}"
+            )
+
+            logging.info(
+                f"Conversation Resolver: "
+                f"{query} -> {resolved}"
+            )
+
+            return resolved
+
+        # --------------------------------
+        # Generic follow-up
+        # --------------------------------
+
+        FOLLOWUP_PHRASES = [
+
+            "what about",
+            "tell me more",
+            "explain more",
+            "more details",
+            "can you elaborate"
+        ]
+
+        if any(
+            phrase in query_lower
+            for phrase in FOLLOWUP_PHRASES
+        ):
+
+            resolved = (
+                f"{query} about "
+                f"{current_entity}"
+            )
+
+            logging.info(
+                f"Conversation Resolver: "
+                f"{query} -> {resolved}"
+            )
+
+            return resolved
+
+        return query
+
+    # =================================================
+    # Main Entry
+    # =================================================
+    def process_query(self, query: str):
+
+        logging.info(f"Processing Query: {query}")
+
+        start_time = time.time()
+
+        diagnostics = {
+            "original_query": query,
+            "route": None,
+            "decomposed_queries": {},
+            "generated_sql": None,
+            "sql_results": None,
+            "rag_query": None,
+            "sql_query_text": None,
+            "latency_seconds": None,
+            "entity": None
+        }
+
+        # =================================================
+        # Step 1 — Entity Extraction (NEW FIXED FLOW)
+        # =================================================
+        # -----------------------------
+        # Update Conversation State
+        # -----------------------------
+
+        self.update_conversation_entity(
+            query
+        )
+
+        current_entity = (
+            self.state.get_entity()
+        )
+
+        diagnostics["entity"] = (
+            current_entity
+        )
+
+        logging.info(
+            f"Current Entity State: "
+            f"{current_entity}"
+        )
+
+        # =================================================
+        # Step 2 — Resolve Conversation Context
+        # =================================================
+        resolved_query = self.resolve_query_context(query)
+
+        # =================================================
+        # Step 3 — Classification uses resolved query
+        # =================================================
+        route = QueryClassifier.classify_query(resolved_query)
+
+        diagnostics["route"] = route
+        logging.info(f"Selected Route: {route}")
+
+        # =================================================
+        # SQL ROUTE
+        # =================================================
+        if route == "SQL":
+
+            logging.info("Executing SQL route...")
+
+            sql_query = self.sql_generator.generate_sql(resolved_query)
+
+            diagnostics["generated_sql"] = sql_query
+
+            if not SQLValidator.validate_query(sql_query):
+
+                diagnostics["latency_seconds"] = round(time.time() - start_time, 2)
 
                 return {
-
                     "route": route,
-
-                    "error": (
-                        "Unsafe SQL query blocked."
-                    ),
-
+                    "error": "Unsafe SQL query blocked.",
                     "diagnostics": diagnostics
                 }
 
-            # -----------------------------
-            # Execute SQL
-            # -----------------------------
+            results = SQLExecutor.execute_query(sql_query)
 
-            results = (
-                SQLExecutor.execute_query(
-                    sql_query
-                )
-            )
-
-            end_time = time.time()
-
-            diagnostics["latency_seconds"] = round(
-
-                end_time - start_time,
-
-                2
-            )
+            diagnostics["sql_results"] = results
+            diagnostics["latency_seconds"] = round(time.time() - start_time, 2)
 
             return {
-
                 "route": route,
-
                 "sql_query": sql_query,
-
                 "results": results,
-
                 "diagnostics": diagnostics
             }
 
-        # -----------------------------
-        # Placeholder Routes
-        # -----------------------------
-
+        # =================================================
+        # RAG ROUTE
+        # =================================================
         elif route == "RAG":
 
-            logging.info(
-                "Executing RAG route..."
-            )
+            logging.info("Executing RAG route...")
 
             try:
 
-                request = RAGRequest(
-                    query=query
-                )
+                request = RAGRequest(query=resolved_query)
 
-                diagnostics["rag_query"] = (
-                    query
-                )
+                diagnostics["rag_query"] = resolved_query
 
-                response = (
-                    self.pipeline.run(
-                        request
-                    )
-                )
+                response = self.pipeline.run(request)
 
-                end_time = time.time()
-
-                diagnostics["latency_seconds"] = round(
-
-                    end_time - start_time,
-
-                    2
-                )
+                diagnostics["latency_seconds"] = round(time.time() - start_time, 2)
 
                 return {
-
                     "route": route,
-
                     "response": response,
-
                     "diagnostics": diagnostics
                 }
 
             except Exception as e:
 
-                logging.error(
-                    f"RAG Route Error: {e}"
-                )
+                logging.error(f"RAG Route Error: {e}")
 
-                end_time = time.time()
-
-                diagnostics["latency_seconds"] = round(
-
-                    end_time - start_time,
-
-                    2
-                )
+                diagnostics["latency_seconds"] = round(time.time() - start_time, 2)
 
                 return {
-
                     "route": route,
-
                     "error": str(e),
-
                     "diagnostics": diagnostics
                 }
 
+        # =================================================
+        # HYBRID ROUTE
+        # =================================================
         elif route == "HYBRID":
 
-            logging.info(
-                "Executing HYBRID route..."
-            )
+            logging.info("Executing HYBRID route...")
 
             try:
 
-                # -----------------------------
-                # Query Decomposition
-                # -----------------------------
+                decomposed = self.decomposer.decompose_query(resolved_query)
 
-                decomposed = (
-                    self.decomposer
-                    .decompose_query(query)
-                )
-
-                rag_query = (
-                    decomposed["rag_query"]
-                )
-
-                sql_query_text = (
-                    decomposed["sql_query"]
-                )
+                rag_query = decomposed.get("rag_query") or resolved_query
+                sql_query_text = decomposed.get("sql_query") or resolved_query
 
                 diagnostics["decomposed_queries"] = {
-
                     "rag_query": rag_query,
-
                     "sql_query": sql_query_text
                 }
 
-                diagnostics["rag_query"] = (
-                    rag_query
+                diagnostics["rag_query"] = rag_query
+                diagnostics["sql_query_text"] = sql_query_text
+
+                # ---------------- RAG ----------------
+                rag_response = self.pipeline.run(
+                    RAGRequest(query=rag_query)
                 )
 
-                diagnostics["sql_query_text"] = (
-                    sql_query_text
-                )
-                # -----------------------------
-                # Fallback Safety
-                # -----------------------------
+                # ---------------- SQL ----------------
+                sql_query = self.sql_generator.generate_sql(sql_query_text)
 
-                if not rag_query:
-
-                    rag_query = query
-
-                if not sql_query_text:
-
-                    sql_query_text = query
-
-                logging.info(
-                    f"RAG Query: {rag_query}"
-                )
-
-                logging.info(
-                    f"SQL Query: {sql_query_text}"
-                )
-
-                # -----------------------------
-                # RAG Retrieval
-                # -----------------------------
-
-                request = RAGRequest(
-                    query=rag_query
-                )
-
-                diagnostics["rag_query"] = (
-                    query
-                )
-
-                rag_response = (
-                    self.pipeline.run(
-                        request
-                    )
-                )
-
-                # -----------------------------
-                # SQL Retrieval
-                # -----------------------------
-
-                sql_query = (
-                    self.sql_generator.generate_sql(                        
-                        sql_query_text
-                    )
-                )
-
-                diagnostics["generated_sql"] = (
-                    sql_query
-                )
-
-                is_valid = (
-                    SQLValidator.validate_query(
-                        sql_query
-                    )
-                )
+                diagnostics["generated_sql"] = sql_query
 
                 sql_results = []
 
-                if is_valid:
+                if SQLValidator.validate_query(sql_query):
 
-                    sql_results = (
-                        SQLExecutor.execute_query(
-                            sql_query
-                        )
-                    )
+                    sql_results = SQLExecutor.execute_query(sql_query)
 
-                    diagnostics["sql_results"] = (
-                        sql_results
-                    )
+                diagnostics["sql_results"] = sql_results
 
-                else:
-
-                    logging.warning(
-                        "SQL validation failed "
-                        "inside HYBRID route."
-                    )
-
-                # -----------------------------
-                # Build Combined Prompt
-                # -----------------------------
-
+                # ---------------- SYNTHESIS ----------------
                 synthesis_prompt = f"""
+You are an enterprise AI assistant.
 
-        You are an enterprise AI assistant.
+RAG:
+{rag_response.answer}
 
-        Combine the following:
+SQL:
+{sql_results}
 
-        RAG Narrative:
-        {rag_response.answer}
+Combine both into a final response.
+Do not hallucinate missing data.
+"""
 
-        SQL Results:
-        {sql_results}
+                final_answer = self.llm.generate(synthesis_prompt)
 
-        Generate a single unified response.
-
-        IMPORTANT:
-        - Use the RAG narrative for explanations
-        - Use SQL results for exact metrics
-        - Do not hallucinate missing data
-        - Clearly combine both information sources
-
-        """
-
-                # -----------------------------
-                # Final LLM Synthesis
-                # -----------------------------
-
-                final_answer = (
-                    self.llm.generate(
-                        synthesis_prompt
-                    )
-                )
-
-                end_time = time.time()
-
-                diagnostics["latency_seconds"] = round(
-
-                    end_time - start_time,
-
-                    2
-                )
+                diagnostics["latency_seconds"] = round(time.time() - start_time, 2)
 
                 return {
-
                     "route": route,
-
-                    "rag_answer": (
-                        rag_response.answer
-                    ),
-
+                    "rag_answer": rag_response.answer,
                     "sql_results": sql_results,
-
                     "final_answer": final_answer,
-
                     "diagnostics": diagnostics
                 }
 
             except Exception as e:
 
-                logging.error(
-                    f"HYBRID Route Error: {e}"
-                )
+                logging.error(f"HYBRID Route Error: {e}")
 
-                end_time = time.time()
-
-                diagnostics["latency_seconds"] = round(
-
-                    end_time - start_time,
-
-                    2
-                )
+                diagnostics["latency_seconds"] = round(time.time() - start_time, 2)
 
                 return {
-
                     "route": route,
-
                     "error": str(e),
-
                     "diagnostics": diagnostics
                 }
 
-        # -----------------------------
-        # Unknown Route
-        # -----------------------------
-
-        end_time = time.time()
-
-        diagnostics["latency_seconds"] = round(
-
-            end_time - start_time,
-
-            2
-        )
+        # =================================================
+        # fallback
+        # =================================================
+        diagnostics["latency_seconds"] = round(time.time() - start_time, 2)
 
         return {
-
-            "error": "Unknown route"
+            "error": "Unknown route",
+            "diagnostics": diagnostics
         }

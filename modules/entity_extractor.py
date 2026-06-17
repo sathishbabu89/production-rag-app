@@ -4,9 +4,11 @@ import re
 class EntityExtractor:
 
     # -------------------------------------------------
-    # Non-entity stopwords
+    # Non-entity words
     # -------------------------------------------------
+
     STOPWORDS = {
+
         "explain",
         "tell",
         "story",
@@ -22,7 +24,19 @@ class EntityExtractor:
         "describe",
         "details",
         "give",
-        "show"
+        "show",
+
+        # Follow-up query words
+
+        "who",
+        "founded",
+        "founder",
+        "employee",
+        "employees",
+        "count",
+        "revenue",
+        "year",
+        "company"
     }
 
     @staticmethod
@@ -30,17 +44,36 @@ class EntityExtractor:
         query: str
     ) -> list[str]:
         """
-        Lightweight entity extraction
-        using capitalized words
-        with stopword filtering
+        Extract likely business entities
+        from user query.
+
+        Examples:
+
+        Explain Nykaa story
+        -> ["Nykaa"]
+
+        Who founded Nykaa
+        -> ["Nykaa"]
+
+        Explain Zoho story
+        -> ["Zoho"]
+
+        What about employee count?
+        -> []
         """
 
         if not query:
 
             return []
 
+        # -------------------------------------------------
+        # Extract multi-word capitalized phrases
+        # -------------------------------------------------
+
         raw_entities = re.findall(
-            r"\b[A-Z][a-zA-Z0-9]+\b",
+
+            r"\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\b",
+
             query
         )
 
@@ -48,16 +81,68 @@ class EntityExtractor:
 
         for entity in raw_entities:
 
-            entity_lower = entity.lower()
+            entity = entity.strip()
 
-            if entity_lower not in (
-                EntityExtractor.STOPWORDS
-            ):
+            # -------------------------------------------------
+            # Split phrase into words
+            # -------------------------------------------------
 
-                cleaned_entities.append(
-                    entity_lower
+            parts = entity.split()
+
+            # -------------------------------------------------
+            # Remove stopwords
+            # -------------------------------------------------
+
+            filtered_parts = [
+
+                part
+
+                for part in parts
+
+                if part.lower()
+                not in EntityExtractor.STOPWORDS
+            ]
+
+            # -------------------------------------------------
+            # Entire phrase removed
+            # -------------------------------------------------
+
+            if not filtered_parts:
+
+                continue
+
+            entity = " ".join(
+                filtered_parts
+            )
+
+            # -------------------------------------------------
+            # Ignore tiny fragments
+            # -------------------------------------------------
+
+            if len(entity) <= 2:
+
+                continue
+
+            cleaned_entities.append(
+                entity
+            )
+
+        # -------------------------------------------------
+        # Deduplicate while preserving order
+        # -------------------------------------------------
+
+        unique_entities = []
+
+        seen = set()
+
+        for entity in cleaned_entities:
+
+            if entity not in seen:
+
+                unique_entities.append(
+                    entity
                 )
 
-        return list(
-            set(cleaned_entities)
-        )
+                seen.add(entity)
+
+        return unique_entities
