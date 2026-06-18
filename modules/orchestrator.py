@@ -261,14 +261,9 @@ class Orchestrator:
         )
 
         # =================================================
-        # Step 2 — Resolve Conversation Context
+        # Step 2 — CLASSIFICATION (NO MODIFICATION ALLOWED)
         # =================================================
-        resolved_query = self.resolve_query_context(query)
-
-        # =================================================
-        # Step 3 — Classification uses resolved query
-        # =================================================
-        route = QueryClassifier.classify_query(resolved_query)
+        route = QueryClassifier.classify_query(query)
 
         diagnostics["route"] = route
         logging.info(f"Selected Route: {route}")
@@ -279,6 +274,8 @@ class Orchestrator:
         if route == "SQL":
 
             logging.info("Executing SQL route...")
+
+            resolved_query = self.resolve_query_context(query)
 
             sql_query = self.sql_generator.generate_sql(resolved_query)
 
@@ -306,6 +303,7 @@ class Orchestrator:
                 "diagnostics": diagnostics
             }
 
+
         # =================================================
         # RAG ROUTE
         # =================================================
@@ -314,6 +312,8 @@ class Orchestrator:
             logging.info("Executing RAG route...")
 
             try:
+
+                resolved_query = self.resolve_query_context(query)
 
                 request = RAGRequest(query=resolved_query)
 
@@ -341,6 +341,7 @@ class Orchestrator:
                     "diagnostics": diagnostics
                 }
 
+
         # =================================================
         # HYBRID ROUTE
         # =================================================
@@ -350,10 +351,11 @@ class Orchestrator:
 
             try:
 
-                decomposed = self.decomposer.decompose_query(resolved_query)
+                # ❗ IMPORTANT: DO NOT resolve before decomposition
+                decomposed = self.decomposer.decompose_query(query)
 
-                rag_query = decomposed.get("rag_query") or resolved_query
-                sql_query_text = decomposed.get("sql_query") or resolved_query
+                rag_query = decomposed.get("rag_query") or query
+                sql_query_text = decomposed.get("sql_query") or query
 
                 diagnostics["decomposed_queries"] = {
                     "rag_query": rag_query,
@@ -369,7 +371,9 @@ class Orchestrator:
                 )
 
                 # ---------------- SQL ----------------
-                sql_query = self.sql_generator.generate_sql(sql_query_text)
+                resolved_sql_query = self.resolve_query_context(sql_query_text)
+
+                sql_query = self.sql_generator.generate_sql(resolved_sql_query)
 
                 diagnostics["generated_sql"] = sql_query
 
@@ -383,17 +387,17 @@ class Orchestrator:
 
                 # ---------------- SYNTHESIS ----------------
                 synthesis_prompt = f"""
-You are an enterprise AI assistant.
+        You are an enterprise AI assistant.
 
-RAG:
-{rag_response.answer}
+        RAG:
+        {rag_response.answer}
 
-SQL:
-{sql_results}
+        SQL:
+        {sql_results}
 
-Combine both into a final response.
-Do not hallucinate missing data.
-"""
+        Combine both into a final response.
+        Do not hallucinate missing data.
+        """
 
                 final_answer = self.llm.generate(synthesis_prompt)
 
